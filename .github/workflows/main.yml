@@ -1,0 +1,48 @@
+name: Windows RDP (Tailscale + Cloudflare)
+
+on: 
+  workflow_dispatch:
+    inputs:
+      rdp_password:
+        description: 'اكتب الباسورد اللي هتدخل بيه على الويندوز'
+        required: true
+        default: 'P@ssw0rd123456!'
+
+jobs:
+  run-windows-server:
+    runs-on: windows-latest
+    steps:
+      - name: 🛠 تفعيل الـ RDP وتغيير الباسورد
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          Set-LocalUser -Name "runneradmin" -Password (ConvertTo-SecureString -String "${{ github.event.inputs.rdp_password }}" -AsPlainText -Force)
+        
+      - name: 🌐 تشغيل Cloudflare Tunnel
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe" -OutFile "$env:SystemRoot\system32\cloudflared.exe"
+          cloudflared service install ${{ secrets.CF_TOKEN }}
+        continue-on-error: true
+
+      - name: 🦎 تشغيل Tailscale واستخراج الـ IP
+        run: |
+          # تحميل وتثبيت Tailscale
+          Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe" -OutFile "tailscale-setup.exe"
+          Start-Process -FilePath "tailscale-setup.exe" -ArgumentList "/quiet" -Wait
+          Start-Sleep -Seconds 5
+          
+          # تسجيل الدخول بالمفتاح
+          & "C:\Program Files\Tailscale\tailscale.exe" up --authkey ${{ secrets.TAILSCALE_AUTHKEY }} --unattended
+          
+          # استخراج الـ IP وطباعة بيانات الدخول
+          $IP = & "C:\Program Files\Tailscale\tailscale.exe" ip -4
+          Write-Host "========================================="
+          Write-Host "🚀 Tailscale IP: $IP"
+          Write-Host "👤 Username: runneradmin"
+          Write-Host "🔑 Password: ${{ github.event.inputs.rdp_password }}"
+          Write-Host "========================================="
+
+      - name: ⏳ إبقاء السيرفر قيد التشغيل (Keep Alive)
+        run: |
+          Write-Host "السيرفر شغال الآن ومستعد للاتصال..."
+          while ($true) { Start-Sleep -Seconds 300 }
